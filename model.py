@@ -104,7 +104,7 @@ class Model(object):
 
     def build_graph(self):
         drop_flag = self.drop_flag
-        if self.mode == 'train' or self.mode == 'val':
+        if self.mode == 'train':
             T,P,L,self.target = self.iterator.get_next()
         else:
             T, P, L = self.iterator.get_next()
@@ -126,6 +126,7 @@ class Model(object):
         self.L = L
         self.max_length = max_length
 
+
         word_embedding = tf.get_variable('word_embedding',
             shape=[self.num_vocab,self.vocab_size],initializer=tf.truncated_normal_initializer())
         pos_embedding = tf.get_variable('pos_embedding',
@@ -135,30 +136,30 @@ class Model(object):
         pos = tf.nn.embedding_lookup(pos_embedding,P)
         features = tf.concat([text,pos],axis=-1)
 
-        for i in range(self.layers_rnn):
+        # for i in range(self.layers_rnn):
 
-            f_cell = tf.nn.rnn_cell.GRUCell(num_units=self.num_units//2)
-            b_cell = tf.nn.rnn_cell.GRUCell(num_units=self.num_units//2)
-
-
-
-            f_state = f_cell.zero_state(batch_size,dtype=tf.float32)
-            b_state = b_cell.zero_state(batch_size,dtype=tf.float32)
-
-            outputs,_ = tf.nn.bidirectional_dynamic_rnn(cell_fw=f_cell,
-                                                        cell_bw=b_cell,
-                                                        inputs=features,
-                                                        initial_state_fw=f_state,
-                                                        initial_state_bw=b_state,
-                                                        dtype=tf.float32,
-                                                        sequence_length=L)
-
-            features = tf.concat(outputs,axis=-1)
+        #     f_cell = tf.nn.rnn_cell.GRUCell(num_units=self.num_units//2)
+        #     b_cell = tf.nn.rnn_cell.GRUCell(num_units=self.num_units//2)
 
 
-        # mask =tf.cast(tf.greater(T,0),tf.float32)
-        mask = tf.sequence_mask(L,dtype=tf.float32)
-        mask = tf.expand_dims(mask,axis=-1)
+
+        #     f_state = f_cell.zero_state(batch_size,dtype=tf.float32)
+        #     b_state = b_cell.zero_state(batch_size,dtype=tf.float32)
+
+        #     outputs,_ = tf.nn.bidirectional_dynamic_rnn(cell_fw=f_cell,
+        #                                                 cell_bw=b_cell,
+        #                                                 inputs=features,
+        #                                                 initial_state_fw=f_state,
+        #                                                 initial_state_bw=b_state,
+        #                                                 dtype=tf.float32,
+        #                                                 sequence_length=L)
+
+        #     features = tf.concat(outputs,axis=-1)
+
+
+        # # mask =tf.cast(tf.greater(T,0),tf.float32)
+        # mask = tf.sequence_mask(L,dtype=tf.float32)
+        # mask = tf.expand_dims(mask,axis=-1)
 
         x = features
 
@@ -168,17 +169,20 @@ class Model(object):
             x3 = tf.layers.conv1d(x,kernel_size=4,filters=self.d_model//4,padding='same',activation=tf.nn.relu)
             x4 = tf.layers.conv1d(x,kernel_size=5,filters=self.d_model//4,padding='same',activation=tf.nn.relu)
             _x = tf.concat([x1,x2,x3,x4],axis=-1)
-            x = x+_x
-        
+            x = _x
+        # x = features
+        # x = tf.layers.conv1d(x,kernel_size=3,filters=self.d_model,padding='same',activation=tf.nn.relu)
         x_row = tf.tile(tf.expand_dims(x,axis=1),[1,max_length,1,1])
         x_col = tf.tile(tf.expand_dims(x,axis=2),[1,1,max_length,1])
 
-        x_max = tf.reduce_max(x,axis=1,keep_dims=True)
-        x_max = tf.tile(tf.expand_dims(x_max,axis=1),[1,max_length,max_length,1])
-        x = tf.concat([x_col,x_row,x_max],axis=-1)
+        x = tf.concat([x_col,x_row],axis=-1)
 
-        # x = tf.concat([x_col,x_row],axis=-1)
-
+        # for i in range(self.layers_cnn):
+        #     x = tf.layers.conv2d(x,
+        #                          filters=self.d_model,
+        #                          kernel_size=3,
+        #                          padding='same',
+        #                          activation=tf.nn.relu)
         # output dropout
         x = tf.cond(drop_flag,lambda:tf.nn.dropout(x,0.5),lambda:x)
 
@@ -204,10 +208,10 @@ class Model(object):
         mask = tf.tile(tf.expand_dims(mask,axis=-1),[1,1,1,self.num_target+1])
 
         sub_mask = tf.less(tf.random_uniform(shape=tf.shape(label),minval=0,maxval=1),0.1)
-        label_mask = tf.cast(label,dtype=tf.bool)
+        label_mask = label>0
         sub_mask = tf.cast(tf.logical_or(sub_mask,label_mask),tf.float32)
 
-        mask = tf.multiply(mask,sub_mask)
+        mask = tf.multiply(sub_mask,mask)
 
         losses = tf.nn.sigmoid_cross_entropy_with_logits(labels=label,logits=logit)*mask
         loss = tf.reduce_sum(losses)/tf.reduce_sum(mask)
@@ -220,6 +224,7 @@ class Model(object):
         train_variables = tf.trainable_variables()
         global_step = self.global_step
         run_ops = {'step':global_step,'loss':self.loss}
+
         grads_and_vars = self.optimizer.compute_gradients(self.loss,train_variables)
         run_ops['train_ops'] = self.optimizer.apply_gradients(grads_and_vars,global_step=global_step)
         saver = tf.train.Saver(var_list, max_to_keep=3, filename=self.ckpt_name)
@@ -275,7 +280,7 @@ class Model(object):
                 # train steps
                 for i in range(self.steps_each_epoch):
                     result = sess.run(run_ops, feed_dict={self.handle_holder: train_handle,self.drop_flag:True})
-                    if result['step'] %1 == 0:
+                    if result['step'] %100 == 0:
                         print('%d:\t%f' % (result['step'], result['loss']))
                 logit_list = []
                 label_list = []
@@ -287,11 +292,11 @@ class Model(object):
                     logit_array,label_array,length_array,loss_ =\
                      sess.run([self.logit,self.target,self.L,self.loss],
                         feed_dict={self.handle_holder:val_handle,self.drop_flag:False})
-                    logit_list.extend(sigmoid(logit_array))
+                    logit_list.extend(logit_array)
                     label_list.extend(label_array)
                     length_list.extend(length_array)
                     loss_list.append(loss_)
-
+                logit_list = [sigmoid(logit) for logit in logit_list]
                 print('epoch %d'%e)
                 # score = val_fn(label_list,logit_list)
                 print('loss:\t%f'%np.mean(loss_list))
@@ -402,9 +407,15 @@ if __name__ == '__main__':
         val_set = ds.make_train_dataset('./data/dev_data_char.json',batch_size=conf.batch_size,shuffle=False)
 
         model = Model(conf,train_set,val_set)
+
         model.build_graph()
         model.compute_loss()
         model.train_val()
+    elif conf.mode == 'val':
+        infer_set = ds.make_test_dataset('./data/dev_data_char.json',batch_size=conf.batch_size)
+        model = Model(conf,infer_set=infer_set)
+        model.build_graph()
+        model.val()
     else:
         infer_set = ds.make_test_dataset('./data/test_data_char.json',batch_size=conf.batch_size)
         model = Model(conf,infer_set=infer_set)

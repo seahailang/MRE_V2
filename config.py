@@ -21,7 +21,7 @@ import math
 parser = argparse.ArgumentParser()
 parser.add_argument('--mode',default='train')
 parser.add_argument('--epochs',default=100,type=int)
-parser.add_argument('--batch_size',default=16,type=int)
+parser.add_argument('--batch_size',default=32,type=int)
 
 args = parser.parse_args()
 
@@ -30,12 +30,12 @@ VOCAB_SIZE = 8000
 class Config(object):
     def __init__(self):
         self.num_vocab = 8000
-        self.vocab_size = 128
+        self.vocab_size = 64
         self.num_pos = 25
-        self.pos_size = 128
-        self.position_size = 64
-        self.d_model = 256
-        self.num_units = 256
+        self.pos_size = 32
+        # self.d_model = self.vocab_size+self.pos_size
+        self.d_model = 64
+        self.num_units = self.vocab_size+self.pos_size
 
         self.num_target = 49
         self.target_size = 4
@@ -49,9 +49,9 @@ class Config(object):
         self.train_epochs = args.epochs
         self.batch_size = args.batch_size
         self.val_steps = math.ceil(21639/self.batch_size)
-        self.steps_each_epoch = math.ceil(173100/self.batch_size)
+        self.steps_each_epoch = math.ceil(173108/self.batch_size)
         # self.val_steps = 10
-        # self.steps_each_epoch = 10
+        # self.steps_each_epoch = 500
 
         self.infer_steps = math.ceil(9949/self.batch_size)
 
