@@ -17,6 +17,7 @@ from __future__ import print_function
 
 import tensorflow as tf
 import numpy as np
+import time
 import json
 from sklearn.metrics import f1_score
 
@@ -136,25 +137,25 @@ class Model(object):
         pos = tf.nn.embedding_lookup(pos_embedding,P)
         features = tf.concat([text,pos],axis=-1)
 
-        # for i in range(self.layers_rnn):
+        for i in range(self.layers_rnn):
 
-        #     f_cell = tf.nn.rnn_cell.GRUCell(num_units=self.num_units//2)
-        #     b_cell = tf.nn.rnn_cell.GRUCell(num_units=self.num_units//2)
+            f_cell = tf.nn.rnn_cell.GRUCell(num_units=self.num_units//2)
+            b_cell = tf.nn.rnn_cell.GRUCell(num_units=self.num_units//2)
 
 
 
-        #     f_state = f_cell.zero_state(batch_size,dtype=tf.float32)
-        #     b_state = b_cell.zero_state(batch_size,dtype=tf.float32)
+            f_state = f_cell.zero_state(batch_size,dtype=tf.float32)
+            b_state = b_cell.zero_state(batch_size,dtype=tf.float32)
 
-        #     outputs,_ = tf.nn.bidirectional_dynamic_rnn(cell_fw=f_cell,
-        #                                                 cell_bw=b_cell,
-        #                                                 inputs=features,
-        #                                                 initial_state_fw=f_state,
-        #                                                 initial_state_bw=b_state,
-        #                                                 dtype=tf.float32,
-        #                                                 sequence_length=L)
+            outputs,_ = tf.nn.bidirectional_dynamic_rnn(cell_fw=f_cell,
+                                                        cell_bw=b_cell,
+                                                        inputs=features,
+                                                        initial_state_fw=f_state,
+                                                        initial_state_bw=b_state,
+                                                        dtype=tf.float32,
+                                                        sequence_length=L)
 
-        #     features = tf.concat(outputs,axis=-1)
+            features = tf.concat(outputs,axis=-1)
 
 
         # # mask =tf.cast(tf.greater(T,0),tf.float32)
@@ -219,35 +220,32 @@ class Model(object):
         return self.loss
 
     def train(self):
-        assert self.loss != None,'must compute loss before train'
+        assert self.loss != None, 'must compute loss before train'
+
         var_list = tf.global_variables()
         train_variables = tf.trainable_variables()
         global_step = self.global_step
-        run_ops = {'step':global_step,'loss':self.loss}
-
-        grads_and_vars = self.optimizer.compute_gradients(self.loss,train_variables)
-        run_ops['train_ops'] = self.optimizer.apply_gradients(grads_and_vars,global_step=global_step)
-        saver = tf.train.Saver(var_list, max_to_keep=3, filename=self.ckpt_name)
+        run_ops = {'step': global_step, 'loss': self.loss}
+        grads_and_vars = self.optimizer.compute_gradients(self.loss, train_variables)
+        run_ops['train_ops'] = self.optimizer.apply_gradients(grads_and_vars, global_step=global_step)
+        saver = tf.train.Saver(var_list, max_to_keep=5, filename=self.ckpt_name)
         initializer = tf.global_variables_initializer()
-        with tf.Session(config = self.gpu_config) as sess:
+        with tf.Session(config=self.gpu_config) as sess:
             sess.run(initializer)
             ckpt = tf.train.latest_checkpoint(self.ckpt_path, self.ckpt_name)
             if ckpt:
-                saver.restore(sess,ckpt)
-                print('restore model from %s'%ckpt)
+                saver.restore(sess, ckpt)
             train_handle = sess.run(self.train_iterator)
             for e in range(self.train_epochs):
-                result={}
+                result = {}
+                # train steps
                 for i in range(self.steps_each_epoch):
-                    result = sess.run(run_ops,
-                                      feed_dict={self.handle_holder:train_handle,self.drop_flag:True})
-                    if i%100 == 0:
-                        print('%d:\t%f'%(result['step'],result['loss']))
-                saver.save(sess,self.ckpt_path,
+                    result = sess.run(run_ops, feed_dict={self.handle_holder: train_handle,self.drop_flag:True})
+                    if result['step'] %100 == 0:
+                        print('%d:\t%f' % (result['step'], result['loss']))
+                saver.save(sess, self.ckpt_path,
                            global_step=result['step'],
                            latest_filename=self.ckpt_name)
-
-                print('epoch %d'%e)
 
 
 
@@ -321,16 +319,18 @@ class Model(object):
 
         var_list = tf.global_variables()
         saver = tf.train.Saver(var_list, max_to_keep=5, filename=self.ckpt_name)
-        logit_tensor = self.logit
+        logit_tensor = tf.sigmoid(self.logit)
         length_tensor = self.L
+        initializer = tf.global_variables_initializer()
         with tf.Session(config=self.gpu_config) as sess:
+            sess.run(initializer)
             ckpt = tf.train.latest_checkpoint(self.ckpt_path, self.ckpt_name)
             saver.restore(sess, ckpt)
             logit_list = []
             length_list =[]
             for _ in range(self.infer_steps):
                 logit_array,length_array = sess.run([logit_tensor,length_tensor],feed_dict={self.drop_flag:False})
-                logit_list.extend(sigmoid(logit_array))
+                logit_list.extend(logit_array)
                 length_list.extend(length_array)
 
         with open('./data/test_data_char.json',encoding='utf-8') as file:
@@ -345,33 +345,70 @@ class Model(object):
     def val(self):
         var_list = tf.global_variables()
         saver = tf.train.Saver(var_list, max_to_keep=5, filename=self.ckpt_name)
-        logit_tensor = self.logit
+        logit_tensor = tf.sigmoid(self.logit)
         length_tensor = self.L
-
+        initializer = tf.global_variables_initializer()
         with tf.Session(config=self.gpu_config) as sess:
+            sess.run(initializer)
+            last_ckpt = ''
+
             ckpt = tf.train.latest_checkpoint(self.ckpt_path, self.ckpt_name)
             saver.restore(sess, ckpt)
+            print(ckpt)
             
             logit_list = []
             length_list =[]
             for _ in range(self.val_steps):
                 logit_array,length_array = sess.run([logit_tensor,length_tensor],feed_dict={self.drop_flag:False})
-                logit_list.extend(sigmoid(logit_array))
+                logit_list.extend(logit_array)
                 length_list.extend(length_array)
-        with open('./data/dev_data_char.json',encoding='utf-8') as file:
-                data = [json.loads(line) for line in file]
-        for t in np.arange(0.1,0.6,0.1):
-            decode_fn(logit_list,
-                length_list,
-                data,
-                './result_dev_%.3f.json'%t,
-                num_target=self.num_target,
-                threshold = t)
-            p,r,f = compute_Fscore('./result_dev_%.3f.json'%t,'./data/dev_data.json')
-            print(p,r,f,t)
+            with open('./data/dev_data_char.json',encoding='utf-8') as file:
+                    data = [json.loads(line) for line in file]
+            for t in np.arange(0.1,0.6,0.1):
+                decode_fn(logit_list,
+                    length_list,
+                    data,
+                    './result_dev_%.3f.json'%t,
+                    num_target=self.num_target,
+                    threshold = t)
+                p,r,f = compute_Fscore('./result_dev_%.3f.json'%t,'./data/dev_data.json')
+                print(p,r,f,t)
+    def val_with_threshold(self,threshold=0.5):
+        var_list = tf.global_variables()
+        saver = tf.train.Saver(var_list, max_to_keep=5, filename=self.ckpt_name)
+        logit_tensor = tf.sigmoid(self.logit)
+        length_tensor = self.L
+        e = 0
+        with tf.Session(config=self.gpu_config) as sess:
+            last_ckpt = ''
+            while True:
+                ckpt = tf.train.latest_checkpoint(self.ckpt_path, self.ckpt_name)
+                if not ckpt or ckpt == last_ckpt:
+                    time.sleep(60)
+                    continue
+                saver.restore(sess, ckpt)
+                e = e + 1
+                last_ckpt = ckpt
+                print(ckpt)
+                logit_list = []
+                length_list =[]
+                for i in range(self.val_steps):
+                    logit_array,length_array = sess.run([logit_tensor,length_tensor],feed_dict={self.drop_flag:False})
+                    logit_list.extend(logit_array)
+                    length_list.extend(length_array)
+                    # print(i)
+                print(e)
+                # logit_list = [sigmoid(logit) for logit in logit_list]
+                with open('./data/dev_data_char.json',encoding='utf-8') as file:
+                        data = [json.loads(line) for line in file]
+                decode_fn(logit_list,
+                    length_list,
+                    data,
+                    './result_dev_epoch_%d.json'%e,
+                    num_target=self.num_target,
+                    threshold = threshold)
+                p,r,f = compute_Fscore('./result_dev_epoch_%d.json'%e,'./data/dev_data.json')
 
-def sigmoid(array):
-    return 1/(1+np.power(np.e,-array))
 
 def decode_fn(logit_array,length_array,data,out_file,num_target=49,threshold=0.5):
     with open('./relation_map.txt',encoding='utf-8') as file:
@@ -382,6 +419,11 @@ def decode_fn(logit_array,length_array,data,out_file,num_target=49,threshold=0.5
             pos_list = item['pos_list']
             spo_list = []
             ners = {i:i+np.argmax(logit[i,i:length,-1]) for i in range(length)}
+            for i in range(length):
+            	for j in range(i,length):
+            		if logit[i,j,-1]>threshold:
+            			ners[i] = j
+            			break
             for i,j,r in zip(*np.where(logit[:length,:length,:-1]>threshold)):
                 sbj = ''.join([pos_list[k]['word'] for k in range(i,ners[i]+1)])
                 obj = ''.join([pos_list[k]['word'] for k in range(j,ners[j]+1)])
@@ -410,12 +452,12 @@ if __name__ == '__main__':
 
         model.build_graph()
         model.compute_loss()
-        model.train_val()
+        model.train()
     elif conf.mode == 'val':
         infer_set = ds.make_test_dataset('./data/dev_data_char.json',batch_size=conf.batch_size)
         model = Model(conf,infer_set=infer_set)
         model.build_graph()
-        model.val()
+        model.val_with_threshold()
     else:
         infer_set = ds.make_test_dataset('./data/test_data_char.json',batch_size=conf.batch_size)
         model = Model(conf,infer_set=infer_set)

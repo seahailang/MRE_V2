@@ -62,7 +62,9 @@ def decode_train(line,is_char):
                       relation['object_begin'],\
                       relation['object_end']
         target[sb][se][num_target] = 1
+        target[se][sb][num_target] = 1
         target[ob][oe][num_target] = 1
+        target[oe][ob][num_target] = 1
         target[sb][ob][idx] = 1
 
     return np.array(text).astype(np.int32),\
